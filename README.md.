@@ -1,0 +1,16 @@
+# Express.js REST API
+
+## 🚀 Overview
+A fully functional Express.js REST API for managing products.
+
+## 🧩 Features
+- CRUD operations
+- Middleware: logger, auth, validation
+- Global error handling
+- Filtering, pagination, search, and category stats
+
+## 🛠️ Setup
+```bash
+npm install
+cp .env.example .env
+npm start
