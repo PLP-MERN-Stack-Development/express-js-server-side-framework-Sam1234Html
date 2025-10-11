@@ -1,0 +1,8 @@
+POST /api/products
+{
+  "name": "Phone",
+  "description": "Smartphone",
+  "price": 999,
+  "category": "Electronics",
+  "inStock": true
+}
