@@ -1,0 +1,249 @@
+// server.js
+import express from 'express';
+import dotenv from 'dotenv';
+
+// --- Configuration and Environment Setup ---
+dotenv.config();
+const app = express();
+const PORT = process.env.PORT || 5000;
+
+// Set a mock secret token for the auth middleware (Use .env in production)
+// For testing, set SECRET_TOKEN="super-secret-key" in your .env file
+if (!process.env.SECRET_TOKEN) {
+  process.env.SECRET_TOKEN = 'mock-secret-key';
+}
+
+
+// --- 1. Mock Data Store ---
+let products = [
+  { id: 1, name: 'Laptop Pro', price: 1200.00, category: 'Electronics', rating: 4.5, stock: 10 },
+  { id: 2, name: 'Cotton T-Shirt', price: 25.50, category: 'Apparel', rating: 4.2, stock: 50 },
+  { id: 3, name: 'Ceramic Mug', price: 15.00, category: 'Home Goods', rating: 4.8, stock: 20 },
+  { id: 4, name: 'Mechanical Keyboard', price: 75.99, category: 'Electronics', rating: 4.0, stock: 5 },
+  { id: 5, name: 'Running Shoes', price: 89.99, category: 'Apparel', rating: 4.6, stock: 35 },
+  { id: 6, name: 'Wireless Mouse', price: 35.00, category: 'Electronics', rating: 4.1, stock: 15 },
+];
+let nextProductId = products.length + 1; // Used for new product IDs
+
+
+// --- 2. Custom Error Class for Consistency ---
+class APIError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.status = status;
+  }
+}
+
+
+// --- 3. Middleware Implementation ---
+
+// 3.1. Logging Middleware
+const logger = (req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} | IP: ${req.ip}`);
+  next();
+};
+
+// 3.2. Authentication Middleware
+const authMiddleware = (req, res, next) => {
+  const token = req.headers.authorization;
+  const expectedToken = `Bearer ${process.env.SECRET_TOKEN}`;
+
+  if (token && token === expectedToken) {
+    // In a real app, you'd decode and verify the token here
+    next();
+  } else {
+    // 401 Unauthorized
+    next(new APIError('Authentication required. Invalid or missing token.', 401));
+  }
+};
+
+// 3.3. Validation Middleware
+const validateProduct = (req, res, next) => {
+  const { name, price, category } = req.body;
+
+  if (!name || !price || !category) {
+    // 400 Bad Request
+    return next(new APIError('Validation failed: Product must include name, price, and category.', 400));
+  }
+  if (typeof price !== 'number' || price <= 0) {
+    return next(new APIError('Validation failed: Price must be a positive number.', 400));
+  }
+
+  next();
+};
+
+
+// --- Apply Global Middleware ---
+app.use(logger);
+app.use(express.json()); // Body Parser
+
+
+// --- 4. Controller Functions ---
+
+// GET /api/products
+const getProducts = (req, res, next) => {
+  let filteredProducts = [...products];
+
+  // Advanced Features: Filtering, Search, Pagination
+
+  // Filtering & Search
+  const { category, minPrice, maxPrice, search } = req.query;
+
+  if (category) {
+    filteredProducts = filteredProducts.filter(p => p.category.toLowerCase() === category.toLowerCase());
+  }
+  if (minPrice) {
+    filteredProducts = filteredProducts.filter(p => p.price >= parseFloat(minPrice));
+  }
+  if (maxPrice) {
+    filteredProducts = filteredProducts.filter(p => p.price <= parseFloat(maxPrice));
+  }
+  if (search) {
+    const searchTerm = search.toLowerCase();
+    filteredProducts = filteredProducts.filter(
+      p => p.name.toLowerCase().includes(searchTerm) || 
+           p.category.toLowerCase().includes(searchTerm)
+    );
+  }
+
+  // Pagination
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const startIndex = (page - 1) * limit;
+  const endIndex = page * limit;
+
+  const paginatedResults = {
+    totalProducts: filteredProducts.length,
+    currentPage: page,
+    totalPages: Math.ceil(filteredProducts.length / limit),
+    products: filteredProducts.slice(startIndex, endIndex)
+  };
+
+  res.json(paginatedResults);
+};
+
+
+// GET /api/products/:id
+const getProductById = (req, res, next) => {
+  const id = parseInt(req.params.id);
+  const product = products.find(p => p.id === id);
+
+  if (product) {
+    res.json(product);
+  } else {
+    // Throw APIError to be caught by the general error handler
+    next(new APIError(`Product not found with id: ${id}`, 404));
+  }
+};
+
+
+// POST /api/products
+const createProduct = (req, res, next) => {
+  const { name, price, category, rating, stock } = req.body;
+
+  const newProduct = {
+    id: nextProductId++,
+    name,
+    price: parseFloat(price),
+    category,
+    rating: rating ? parseFloat(rating) : 0,
+    stock: stock ? parseInt(stock) : 0,
+  };
+
+  products.push(newProduct);
+  res.status(201).json(newProduct); // 201 Created
+};
+
+
+// PUT /api/products/:id
+const updateProduct = (req, res, next) => {
+  const id = parseInt(req.params.id);
+  const index = products.findIndex(p => p.id === id);
+
+  if (index !== -1) {
+    const existingProduct = products[index];
+    
+    // Update fields while ensuring numeric types are parsed
+    products[index] = {
+      ...existingProduct,
+      ...req.body,
+      // Ensure key numeric fields are correctly typed during update
+      price: req.body.price !== undefined ? parseFloat(req.body.price) : existingProduct.price,
+      rating: req.body.rating !== undefined ? parseFloat(req.body.rating) : existingProduct.rating,
+      stock: req.body.stock !== undefined ? parseInt(req.body.stock) : existingProduct.stock,
+    };
+    
+    res.json(products[index]);
+  } else {
+    next(new APIError(`Cannot update. Product not found with id: ${id}`, 404));
+  }
+};
+
+
+// DELETE /api/products/:id
+const deleteProduct = (req, res, next) => {
+  const id = parseInt(req.params.id);
+  const initialLength = products.length;
+
+  products = products.filter(p => p.id !== id);
+
+  if (products.length < initialLength) {
+    res.status(204).send(); // 204 No Content
+  } else {
+    next(new APIError(`Cannot delete. Product not found with id: ${id}`, 404));
+  }
+};
+
+
+// --- 5. API Routes ---
+const productRouter = express.Router();
+
+productRouter
+  .route('/')
+  .get(getProducts) // Public: Filtering, Search, Pagination
+  .post(authMiddleware, validateProduct, createProduct); // Protected: Auth + Validation
+
+productRouter
+  .route('/:id')
+  .get(getProductById) // Public
+  .put(authMiddleware, validateProduct, updateProduct) // Protected: Auth + Validation
+  .delete(authMiddleware, deleteProduct); // Protected: Auth
+
+// Mount the product router
+app.use('/api/products', productRouter);
+
+// Basic home route
+app.get('/', (req, res) => {
+    res.send('Welcome to the Express.js RESTful API Assignment!');
+});
+
+
+// --- 6. Error Handling Middleware (MUST be last) ---
+
+// 6.1. 404 Not Found Handler
+const notFound = (req, res, next) => {
+  const error = new APIError(`The requested resource was not found on this server - ${req.originalUrl}`, 404);
+  next(error);
+};
+app.use(notFound);
+
+// 6.2. General Error Handler (Catch-all)
+const errorHandler = (err, req, res, next) => {
+  // Use the error status if set, otherwise default to 500
+  const statusCode = err.status || res.statusCode === 200 ? 500 : res.statusCode;
+
+  res.status(statusCode).json({
+    success: false,
+    message: err.message,
+    // Provide stack trace only if not in production
+    stack: process.env.NODE_ENV === 'production' ? null : err.stack,
+  });
+};
+app.use(errorHandler);
+
+
+// --- 7. Server Start ---
+app.listen(PORT, () => {
+  console.log(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+  console.log(`API URL: http://localhost:${PORT}/api/products`);
+});
